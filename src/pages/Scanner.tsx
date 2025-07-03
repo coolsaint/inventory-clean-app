@@ -6,9 +6,10 @@ export default function Scanner() {
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [scannedLots, setScannedLots] = useState<{[key: string]: number}>({});
   const [scanInput, setScanInput] = useState('');
-  // Note: These could be used for additional features like scan history display
-  // const [lastScannedLot, setLastScannedLot] = useState<any>(null);
-  // const [scanHistory, setScanHistory] = useState<any[]>([]);
+  // Track last scanned lot and scan history for animation and display
+  const [lastScannedLot, setLastScannedLot] = useState<any>(null);
+  const [scanHistory, setScanHistory] = useState<any[]>([]);
+  const [showScanHistory, setShowScanHistory] = useState(false);
   const [isDesktop, setIsDesktop] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showErrorModal, setShowErrorModal] = useState(false);
@@ -115,18 +116,22 @@ export default function Scanner() {
         [lotNumber]: (prev[lotNumber] || 0) + 1
       }));
       
-      // Future: Could track last scanned lot and scan history
-      // setLastScannedLot({
-      //   lotId: lotNumber,
-      //   expiry: lot.expiry,
-      //   timestamp: new Date(),
-      //   count: (scannedLots[lotNumber] || 0) + 1
-      // });
-      // 
-      // setScanHistory(prev => [
-      //   { lotId: lotNumber, timestamp: new Date() },
-      //   ...prev.slice(0, 4)
-      // ]);
+      // Track last scanned lot and scan history for animation and display
+      const newCount = (scannedLots[lotNumber] || 0) + 1;
+      const scanEntry = {
+        lotId: lotNumber,
+        expiry: lot.expiry,
+        timestamp: new Date(),
+        count: newCount
+      };
+      
+      setLastScannedLot(scanEntry);
+      
+      // Add to scan history, keeping most recent 10 scans
+      setScanHistory(prev => [
+        scanEntry,
+        ...prev.slice(0, 9)
+      ]);
       
       setScanInput('');
       setInputError(false);
@@ -153,11 +158,21 @@ export default function Scanner() {
     if (!selectedProduct) return [];
     
     return selectedProduct.lots
-      .map((lot: any) => ({
-        ...lot,
-        scannedCount: scannedLots[lot.id] || 0,
-        status: scannedLots[lot.id] ? 'scanned' : 'pending'
-      }))
+      .map((lot: any) => {
+        // Check if this lot was recently scanned (within last 3 seconds)
+        const isRecentlyScanned = lastScannedLot?.lotId === lot.id;
+        const timeSinceLastScan = lastScannedLot?.timestamp ? 
+          (new Date().getTime() - lastScannedLot.timestamp.getTime()) / 1000 : null;
+        const showRecentAnimation = isRecentlyScanned && timeSinceLastScan !== null && timeSinceLastScan < 3;
+          
+        return {
+          ...lot,
+          scannedCount: scannedLots[lot.id] || 0,
+          status: scannedLots[lot.id] ? 'scanned' : 'pending',
+          isRecentlyScanned,
+          showRecentAnimation
+        };
+      })
       .sort((a: any, b: any) => {
         if (a.status === 'scanned' && b.status === 'pending') return -1;
         if (a.status === 'pending' && b.status === 'scanned') return 1;
@@ -292,9 +307,9 @@ export default function Scanner() {
                       type="text"
                       value={scanInput}
                       onChange={handleInputChange}
-                      onKeyPress={handleScanInput}
-                      placeholder="Enter or scan lot number..."
-                      className={`w-full px-4 py-3 rounded-lg border transition-all duration-200 ${
+                      onKeyDown={handleScanInput}
+                      placeholder="Scan lot number (e.g., 0099362)..."
+                      className={`w-full px-4 py-3 rounded-lg border font-mono text-lg transition-all duration-200 ${
                         isDarkMode 
                           ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:ring-blue-400 focus:border-blue-400' 
                           : 'bg-white border-gray-300 text-gray-900 placeholder-gray-500 focus:ring-blue-500 focus:border-blue-500'
@@ -302,6 +317,66 @@ export default function Scanner() {
                       autoFocus
                     />
                   </div>
+                  
+                  {/* Last Scanned Lot and History */}
+                  {lastScannedLot && (
+                    <div className={`p-3 rounded-lg border ${
+                      isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'
+                    }`}>
+                      <div className="flex justify-between items-center mb-1">
+                        <p className={`text-xs font-medium ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                          Last Scanned:
+                        </p>
+                        <button 
+                          onClick={() => setShowScanHistory(!showScanHistory)}
+                          className={`text-xs px-2 py-0.5 rounded ${isDarkMode ? 'hover:bg-gray-600 text-gray-300' : 'hover:bg-gray-200 text-gray-600'}`}
+                        >
+                          {showScanHistory ? 'Hide History' : 'Show History'}
+                        </button>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <p className="font-mono text-sm font-medium">{lastScannedLot.lotId}</p>
+                          <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                            {new Date(lastScannedLot.timestamp).toLocaleTimeString()}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <CheckCircle className="w-4 h-4 text-green-600" />
+                          <span className="text-sm font-medium text-green-600">
+                            {lastScannedLot.count}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      {/* Scan History */}
+                      {showScanHistory && scanHistory.length > 0 && (
+                        <div className={`mt-3 pt-3 border-t ${isDarkMode ? 'border-gray-600' : 'border-gray-200'}`}>
+                          <p className={`text-xs font-medium mb-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                            Recent Scans:
+                          </p>
+                          <div className="space-y-2 max-h-32 overflow-y-auto pr-1">
+                            {scanHistory.map((scan, index) => (
+                              <div 
+                                key={index}
+                                className="flex justify-between items-center text-xs"
+                              >
+                                <div>
+                                  <p className="font-mono font-medium">{scan.lotId}</p>
+                                  <p className={isDarkMode ? 'text-gray-400' : 'text-gray-600'}>
+                                    {new Date(scan.timestamp).toLocaleTimeString()}
+                                  </p>
+                                </div>
+                                <span className={`px-1.5 py-0.5 rounded ${isDarkMode ? 'bg-gray-600 text-gray-300' : 'bg-gray-200 text-gray-700'}`}>
+                                  {scan.count}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {getTotalScanned() > 0 && (
                     <button
@@ -431,12 +506,19 @@ export default function Scanner() {
                   {getSortedLots().map((lot: any) => (
                     <div
                       key={lot.id}
-                      className={`p-4 rounded-lg border transition-all duration-200 ${
-                        lot.status === 'scanned'
-                          ? (isDarkMode ? 'border-green-600 bg-green-900/20' : 'border-green-200 bg-green-50')
-                          : (isDarkMode ? 'border-gray-600 bg-gray-700' : 'border-gray-200 bg-gray-50')
+                      className={`relative p-4 rounded-lg border transition-all duration-500 ${
+                        lot.showRecentAnimation
+                          ? (isDarkMode ? 'bg-green-800 border-2 border-green-400 shadow-lg scale-105' : 'bg-green-100 border-2 border-green-400 shadow-lg scale-105')
+                          : lot.status === 'scanned'
+                            ? (isDarkMode ? 'border-green-600 bg-green-900/20' : 'border-green-200 bg-green-50')
+                            : (isDarkMode ? 'border-gray-600 bg-gray-700' : 'border-gray-200 bg-gray-50')
                       }`}
                     >
+                      {lot.showRecentAnimation && (
+                        <div className="absolute -top-2 -right-2 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center animate-bounce shadow-lg">
+                          <CheckCircle className="w-4 h-4 text-white" />
+                        </div>
+                      )}
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="font-mono text-sm font-medium">{lot.id}</p>
@@ -447,8 +529,8 @@ export default function Scanner() {
                         <div className="text-right">
                           {lot.status === 'scanned' ? (
                             <div className="flex items-center gap-1">
-                              <CheckCircle className="w-4 h-4 text-green-600" />
-                              <span className="text-sm font-medium text-green-600">
+                              <CheckCircle className={`w-4 h-4 text-green-600 ${lot.showRecentAnimation ? 'animate-pulse' : ''}`} />
+                              <span className={`text-sm font-medium text-green-600 ${lot.showRecentAnimation ? 'animate-pulse' : ''}`}>
                                 {lot.scannedCount}
                               </span>
                             </div>
