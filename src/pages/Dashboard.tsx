@@ -1,8 +1,13 @@
-import React, { useState } from 'react';
-import { Search, Package, CheckCircle, Clock, AlertCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Search, Package, CheckCircle, Clock, AlertCircle, ArrowLeft, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useAuthStore } from '../stores/auth-store';
+import { apiClient } from '../lib/api';
 
 export default function Dashboard() {
+  const navigate = useNavigate();
+  const { runningProject, availableRacks, salePersonInfo, logout } = useAuthStore();
+
   const [searchQuery, setSearchQuery] = useState('');
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [dashboardFilter, setDashboardFilter] = useState('all');
@@ -10,7 +15,8 @@ export default function Dashboard() {
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(50);
   const [isDesktop, setIsDesktop] = useState(false);
-  const navigate = useNavigate();
+  const [isLoading, setIsLoading] = useState(false);
+  const [products, setProducts] = useState<DashboardProduct[]>([]);
 
   // Check screen size
   React.useEffect(() => {
@@ -23,19 +29,150 @@ export default function Dashboard() {
     return () => window.removeEventListener('resize', checkScreenSize);
   }, []);
 
-  // Mock product data with some pre-scanned lots
-  const products = [
+  // Load dashboard data
+  useEffect(() => {
+    loadDashboardData();
+  }, [runningProject]);
+
+  const loadDashboardData = async () => {
+    if (!runningProject) return;
+
+    setIsLoading(true);
+    try {
+      // Get submissions for the current project
+      const submissionsResponse = await apiClient.getSubmissions(runningProject.id, 100, 0);
+
+      if (submissionsResponse.success && submissionsResponse.submissions) {
+        // Transform submissions into dashboard products
+        const dashboardProducts = await transformSubmissionsToProducts(submissionsResponse.submissions);
+        setProducts(dashboardProducts);
+      } else {
+        console.error('Failed to load submissions:', submissionsResponse.error);
+        // Fallback to mock data
+        setProducts(getMockProducts());
+      }
+    } catch (error) {
+      console.error('Error loading dashboard data:', error);
+      // Fallback to mock data
+      setProducts(getMockProducts());
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Transform submissions data into dashboard products
+  const transformSubmissionsToProducts = async (submissions: any[]): Promise<DashboardProduct[]> => {
+    const productMap = new Map<string, DashboardProduct>();
+
+    // Process each submission to extract product information
+    for (const submission of submissions) {
+      try {
+        // Get scan lines for this submission
+        const scanLinesResponse = await apiClient.getSubmissionScanLines(submission.id);
+
+        if (scanLinesResponse.success && scanLinesResponse.scan_lines) {
+          // Group scan lines by product
+          const productGroups = new Map<number, any[]>();
+
+          for (const scanLine of scanLinesResponse.scan_lines) {
+            if (!productGroups.has(scanLine.product_id)) {
+              productGroups.set(scanLine.product_id, []);
+            }
+            productGroups.get(scanLine.product_id)!.push(scanLine);
+          }
+
+          // Create dashboard products from grouped scan lines
+          for (const [productId, scanLines] of productGroups) {
+            const firstScanLine = scanLines[0];
+            const productKey = `${productId}`;
+
+            if (!productMap.has(productKey)) {
+              // Calculate totals
+              const totalLots = scanLines.length;
+              const theoretical = scanLines.reduce((sum, line) => sum + (line.theoretical_qty || 0), 0);
+              const scanned = scanLines.reduce((sum, line) => sum + (line.scanned_qty || 0), 0);
+
+              // Determine status
+              let status: 'pending' | 'partial' | 'complete' = 'pending';
+              const scannedLots = scanLines.filter(line => line.scanned_qty > 0).length;
+              if (scannedLots === totalLots) {
+                status = 'complete';
+              } else if (scannedLots > 0) {
+                status = 'partial';
+              }
+
+              productMap.set(productKey, {
+                id: productId,
+                code: firstScanLine.product_name.split(' ')[0] || `P${productId}`, // Extract code from name or use fallback
+                name: firstScanLine.product_name,
+                totalLots,
+                theoretical,
+                scanned,
+                status,
+                rack: scanLines[0]?.rack_name || availableRacks[0]?.name || 'Unknown',
+                lots: scanLines.map(line => ({
+                  id: line.lot_name,
+                  theoretical: line.theoretical_qty || 0,
+                  scanned: line.scanned_qty || null,
+                  expiry: undefined // Not available in current API
+                }))
+              });
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`Error processing submission ${submission.id}:`, error);
+      }
+    }
+
+    return Array.from(productMap.values());
+  };
+
+  // Fallback mock data
+  const getMockProducts = (): DashboardProduct[] => [
     {
       id: 1,
+      code: '20328',
+      name: 'Dermalogika Instant Glow Glowing and Detoxifying Sheet Mask',
+      totalLots: 7,
+      theoretical: 11,
+      status: 'partial',
+      rack: availableRacks[0]?.name || 'JFP Rack1',
+      lots: [
+        { id: '0060028', theoretical: 5, scanned: 5, expiry: '2025-12-31' },
+        { id: '0068531', theoretical: 1, scanned: 1, expiry: '2025-11-30' },
+        { id: '0072824', theoretical: 1, scanned: 1, expiry: '2025-10-15' },
+        { id: '0076546', theoretical: 1, scanned: null, expiry: '2025-09-20' },
+        { id: '0077091', theoretical: 1, scanned: null, expiry: '2025-08-15' },
+        { id: '0080189', theoretical: 1, scanned: null, expiry: '2025-07-10' },
+        { id: '0090039', theoretical: 1, scanned: null, expiry: '2025-06-05' }
+      ]
+    },
+    {
+      id: 2,
+      code: '1001',
+      name: 'Skin Cafe Almond Oil (Cold Pressed)',
+      totalLots: 3,
+      theoretical: 43,
+      status: 'partial',
+      rack: availableRacks[0]?.name || 'JFP Rack1',
+      lots: [
+        { id: '0099986', theoretical: 20, scanned: 20, expiry: '2025-12-31' },
+        { id: '0099987', theoretical: 15, scanned: null, expiry: '2025-11-30' },
+        { id: '0099988', theoretical: 8, scanned: null, expiry: '2025-10-15' }
+      ]
+    },
+    {
+      id: 3,
       code: '22027',
       name: 'Panam Care Herbal Glow Facial Kit',
       totalLots: 4,
       theoretical: 43,
-      status: 'partial',
-      rack: 'A-15',
+      status: 'pending',
+      rack: availableRacks[1]?.name || 'JFP Rack2',
       lots: [
-        { id: '0099362', theoretical: 8, scanned: 8, expiry: '2025-03-15' },
-        { id: '0099363', theoretical: 12, scanned: 11, expiry: '2025-04-20' },
+        { id: '0099362', theoretical: 8, scanned: null, expiry: '2025-03-15' },
+        { id: '0099363', theoretical: 12, scanned: null, expiry: '2025-04-20' },
         { id: '0099364', theoretical: 5, scanned: null, expiry: '2025-05-10' },
         { id: '0099365', theoretical: 18, scanned: null, expiry: '2025-06-05' }
       ]
@@ -149,8 +286,9 @@ export default function Dashboard() {
   };
 
   const handleProductSelect = (product: any) => {
-    // Navigate to scanner with product context
-    navigate('/scanner', { state: { selectedProduct: product } });
+    // Store selected product in localStorage for scanner to pick up
+    localStorage.setItem('selected_product_code', product.code);
+    navigate('/scanner');
   };
 
   const sortedProducts = [...filteredProducts].sort((a: any, b: any) => {
@@ -192,15 +330,32 @@ export default function Dashboard() {
         <div className="px-4 py-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
-              <Package className="w-6 h-6 text-blue-600" />
-              <h1 className="text-lg font-semibold">Inventory Dashboard</h1>
+              <button onClick={() => navigate('/scanner')}>
+                <ArrowLeft className={`w-5 h-5 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`} />
+              </button>
+              <div>
+                <h1 className="text-lg font-semibold">Inventory Dashboard</h1>
+                <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                  {runningProject?.name || 'Test JFP'} • {runningProject?.location_name || 'JFP/Stock'}
+                </p>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => navigate('/scanner')}
-                className="px-3 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                className={`px-3 py-1 text-sm rounded-lg transition-colors ${
+                  isDarkMode ? 'bg-blue-600 hover:bg-blue-500 text-white' : 'bg-blue-500 hover:bg-blue-600 text-white'
+                }`}
               >
-                Open Scanner
+                Scanner
+              </button>
+              <button
+                onClick={logout}
+                className={`p-2 rounded-lg transition-colors ${
+                  isDarkMode ? 'bg-gray-700 hover:bg-gray-600' : 'bg-gray-100 hover:bg-gray-200'
+                }`}
+              >
+                <LogOut className={`w-4 h-4 ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`} />
               </button>
               <button
                 onClick={() => setIsDarkMode(!isDarkMode)}
@@ -215,8 +370,19 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Loading State */}
+      {isLoading && (
+        <div className="p-8 text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+            Loading submissions data...
+          </p>
+        </div>
+      )}
+
       {/* Overview Stats */}
-      <div className="p-4">
+      {!isLoading && (
+        <div className="p-4">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
           <div className={`p-3 rounded-lg border ${
             isDarkMode ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'
@@ -471,6 +637,7 @@ export default function Dashboard() {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

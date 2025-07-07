@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Package, Eye, EyeOff, Smartphone, Lock, Settings } from 'lucide-react';
+import { useAuthStore } from '../stores/auth-store';
 import ConnectionTest from '../components/ConnectionTest';
-import { apiClient } from '../lib/api';
 
 const theme = (isDark: boolean, darkClass: string, lightClass: string) => 
   isDark ? darkClass : lightClass;
@@ -13,49 +13,47 @@ export default function Login() {
   const [showPin, setShowPin] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [showConnectionTest, setShowConnectionTest] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
 
   const navigate = useNavigate();
+  const { login, isLoading, error, isAuthenticated, clearError } = useAuthStore();
+
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigate('/dashboard');
+    }
+  }, [isAuthenticated, navigate]);
+
+  // Clear error when inputs change
+  useEffect(() => {
+    if (error) {
+      clearError();
+    }
+  }, [mobilePhone, pin, clearError, error]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!mobilePhone.trim() || !pin.trim()) {
-      setError('Please enter both mobile phone and PIN');
       return;
     }
 
-    setIsLoading(true);
-    setError('');
+    // Remove formatting from phone number before sending to API
+    const rawPhoneNumber = mobilePhone.replace(/\D/g, '');
 
-    try {
-      // Remove formatting from phone number before sending to API
-      const rawPhoneNumber = mobilePhone.replace(/\D/g, '');
+    console.log('🔍 Login Debug:', {
+      original: mobilePhone,
+      cleaned: rawPhoneNumber,
+      pin: pin.trim()
+    });
 
-      console.log('🔍 Login Debug:', {
-        original: mobilePhone,
-        cleaned: rawPhoneNumber,
-        pin: pin.trim()
-      });
+    const success = await login({
+      mobile_phone: rawPhoneNumber,
+      pin: pin.trim()
+    });
 
-      const response = await apiClient.login({
-        mobile_phone: rawPhoneNumber,
-        pin: pin.trim()
-      });
-
-      if (response.success) {
-        // Store auth data in localStorage for now
-        localStorage.setItem('auth_token', response.api_token || '');
-        localStorage.setItem('sale_person_info', JSON.stringify(response.sale_person_info || {}));
-        navigate('/scanner');
-      } else {
-        setError(response.error || 'Login failed');
-      }
-    } catch (err: any) {
-      setError('Network error. Please check your connection.');
-    } finally {
-      setIsLoading(false);
+    if (success) {
+      navigate('/dashboard');
     }
   };
 

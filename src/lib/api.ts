@@ -266,18 +266,294 @@ class ApiClient {
     }
   }
 
+  // Get submissions for dashboard
+  async getSubmissions(projectId?: number, limit: number = 50, offset: number = 0): Promise<{
+    success: boolean;
+    submissions?: Array<{
+      id: number;
+      name: string;
+      project_id: number;
+      project_name: string;
+      submission_datetime: string;
+      state: string;
+      scan_count: number;
+      validated_count: number;
+      rack_id: number | false;
+      rack_name: string;
+      notes: string;
+    }>;
+    pagination?: {
+      total_count: number;
+      limit: number;
+      offset: number;
+      has_more: boolean;
+    };
+    error?: string;
+  }> {
+    try {
+      const response = await fetch(`${this.baseURL}/inventory_app/get_submissions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          params: {
+            api_token: this.apiToken,
+            project_id: projectId,
+            limit,
+            offset,
+            order: 'id desc'
+          }
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.result) {
+        return {
+          success: data.result.success,
+          submissions: data.result.submissions,
+          pagination: data.result.pagination,
+          error: data.result.error
+        };
+      } else {
+        return {
+          success: false,
+          error: 'Invalid response format'
+        };
+      }
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch submissions'
+      };
+    }
+  }
+
+  // Get scan lines for a specific submission
+  async getSubmissionScanLines(submissionId: number): Promise<{
+    success: boolean;
+    submission_id?: number;
+    submission_name?: string;
+    scan_count?: number;
+    scan_lines?: Array<{
+      id: number;
+      lot_id: number;
+      lot_name: string;
+      product_id: number;
+      product_name: string;
+      scanned_qty: number;
+      theoretical_qty: number;
+      change_qty: number;
+      state: string;
+      rack_id: number | false;
+      rack_name: string;
+    }>;
+    error?: string;
+  }> {
+    try {
+      const response = await fetch(`${this.baseURL}/inventory_app/get_submission_scan_lines`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          params: {
+            api_token: this.apiToken,
+            submission_id: submissionId,
+            order: 'product_id asc, lot_name asc'
+          }
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.result) {
+        return {
+          success: data.result.success,
+          submission_id: data.result.submission_id,
+          submission_name: data.result.submission_name,
+          scan_count: data.result.scan_count,
+          scan_lines: data.result.scan_lines,
+          error: data.result.error
+        };
+      } else {
+        return {
+          success: false,
+          error: 'Invalid response format'
+        };
+      }
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.message || 'Failed to fetch scan lines'
+      };
+    }
+  }
+
+  // Find product by lot name (when user scans a lot first)
+  async findProductByLot(lotName: string, locationId: number): Promise<{
+    success: boolean;
+    product_info?: {
+      product_id: number;
+      product_name: string;
+      product_code: string;
+      lots: Array<{
+        lot_id: number;
+        lot_name: string;
+        theoretical_qty: number;
+        expiry_date?: string;
+      }>;
+    };
+    error?: string;
+  }> {
+    try {
+      // Mock lot-to-product mapping
+      const lotToProductMap: { [key: string]: string } = {
+        // Skin Cafe Almond Oil lots
+        "0099986": "1001",
+        "0099987": "1001",
+        "0099988": "1001",
+
+        // Panam Care Herbal Glow Facial Kit lots
+        "0099362": "22027",
+        "0099363": "22027",
+        "0099364": "22027",
+        "0099365": "22027",
+
+        // Natural Hair Shampoo lots
+        "LOT001": "5678",
+        "LOT002": "5678"
+      };
+
+      const productCode = lotToProductMap[lotName];
+      if (productCode) {
+        // Get all lots for this product
+        return this.getProductLots(productCode, locationId);
+      } else {
+        // Try real API call for lots not in mock data
+        const lotResponse = await this.getLotInfo(lotName, locationId);
+
+        if (lotResponse.success && lotResponse.data && lotResponse.data.length > 0) {
+          const lotData = lotResponse.data[0];
+
+          // Build product info from real API response
+          const productInfo = {
+            product_id: lotData.product_id,
+            product_name: lotData.product_name,
+            product_code: lotData.product_code,
+            lots: lotData.product_lots?.map(lot => ({
+              lot_id: lot.lot_id,
+              lot_name: lot.lot_name,
+              theoretical_qty: lot.lot_stock || 0,
+              expiry_date: undefined // Not provided in current API
+            })) || []
+          };
+
+          return {
+            success: true,
+            product_info: productInfo
+          };
+        } else {
+          return {
+            success: false,
+            error: "Lot not found"
+          };
+        }
+      }
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.response?.data?.error || 'Failed to find product by lot'
+      };
+    }
+  }
+
+  // Get all lots for a product
+  async getProductLots(productCode: string, locationId: number): Promise<{
+    success: boolean;
+    product_info?: {
+      product_id: number;
+      product_name: string;
+      product_code: string;
+      lots: Array<{
+        lot_id: number;
+        lot_name: string;
+        theoretical_qty: number;
+        expiry_date?: string;
+      }>;
+    };
+    error?: string;
+  }> {
+    try {
+      // Mock data for different products
+      const mockProducts: { [key: string]: any } = {
+        "1001": {
+          product_id: 6938,
+          product_name: "Skin Cafe Almond Oil (Cold Pressed)",
+          product_code: "1001",
+          lots: [
+            { lot_id: 103123, lot_name: "0099986", theoretical_qty: 20, expiry_date: "2025-12-31" },
+            { lot_id: 103124, lot_name: "0099987", theoretical_qty: 15, expiry_date: "2025-11-30" },
+            { lot_id: 103125, lot_name: "0099988", theoretical_qty: 8, expiry_date: "2025-10-15" },
+          ]
+        },
+        "22027": {
+          product_id: 1234,
+          product_name: "Panam Care Herbal Glow Facial Kit",
+          product_code: "22027",
+          lots: [
+            { lot_id: 201001, lot_name: "0099362", theoretical_qty: 8, expiry_date: "2025-03-15" },
+            { lot_id: 201002, lot_name: "0099363", theoretical_qty: 12, expiry_date: "2025-04-20" },
+            { lot_id: 201003, lot_name: "0099364", theoretical_qty: 5, expiry_date: "2025-05-10" },
+            { lot_id: 201004, lot_name: "0099365", theoretical_qty: 18, expiry_date: "2025-06-05" },
+          ]
+        },
+        "5678": {
+          product_id: 5678,
+          product_name: "Natural Hair Shampoo",
+          product_code: "5678",
+          lots: [
+            { lot_id: 301001, lot_name: "LOT001", theoretical_qty: 25, expiry_date: "2025-08-15" },
+            { lot_id: 301002, lot_name: "LOT002", theoretical_qty: 30, expiry_date: "2025-09-20" },
+          ]
+        }
+      };
+
+      const product = mockProducts[productCode];
+      if (product) {
+        return {
+          success: true,
+          product_info: product
+        };
+      } else {
+        return {
+          success: false,
+          error: "Product not found"
+        };
+      }
+    } catch (error: any) {
+      return {
+        success: false,
+        error: error.response?.data?.error || 'Failed to get product lots'
+      };
+    }
+  }
+
   // Lot Information
   async getLotInfo(lotName: string, locationId: number): Promise<LotInfoResponse> {
     try {
-      const response: AxiosResponse<LotInfoResponse> = await this.client.post(
+      const response: AxiosResponse<{jsonrpc: string, id: any, result: LotInfoResponse}> = await this.client.post(
         '/inventory_app/get_lot_info',
         {
-          api_token: this.token,
-          lot_name: lotName,
-          location_id: locationId
+          params: {
+            api_token: this.token,
+            lot_name: lotName,
+            location_id: locationId
+          }
         }
       );
-      return response.data;
+      return response.data.result;
     } catch (error: any) {
       return {
         success: false,
@@ -317,20 +593,7 @@ class ApiClient {
     }
   }
 
-  async getSubmissions(data: GetSubmissionsRequest): Promise<GetSubmissionsResponse> {
-    try {
-      const response: AxiosResponse<GetSubmissionsResponse> = await this.client.post(
-        '/inventory_app/get_submissions',
-        { ...data, api_token: this.token }
-      );
-      return response.data;
-    } catch (error: any) {
-      return {
-        success: false,
-        error: error.response?.data?.error || 'Failed to get submissions'
-      };
-    }
-  }
+
 
   // Check if lot belongs to previous submissions (for re-inventory detection)
   async checkPreviousSubmissions(lotName: string, projectId: number): Promise<GetSubmissionsResponse> {

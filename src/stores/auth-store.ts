@@ -1,6 +1,39 @@
 import { create } from 'zustand';
-import { apiClient, LoginCredentials, LoginResponse } from '../lib/api';
-import { offlineStorage, AuthData } from '../lib/offline-storage';
+import { apiClient } from '../lib/api';
+
+// Local type definitions to avoid import issues
+interface LoginCredentials {
+  mobile_phone: string;
+  pin: string;
+}
+
+interface LoginResponse {
+  success: boolean;
+  api_token?: string;
+  sale_person_id?: number;
+  sale_person_info?: {
+    id: number;
+    name: string;
+    mobile_phone: string;
+    store_location: number;
+    store_location_name: string;
+  };
+  running_project?: {
+    id: number;
+    name: string;
+    location_id: number;
+    location_name: string;
+    start_date: string;
+  };
+  available_racks?: Array<{
+    id: number;
+    name: string;
+    location_id: number;
+    location_name: string;
+    note: string;
+  }>;
+  error?: string;
+}
 
 export interface SalePersonInfo {
   id: number;
@@ -62,16 +95,14 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const response: LoginResponse = await apiClient.login(credentials);
 
       if (response.success && response.api_token) {
-        const authData: AuthData = {
-          apiToken: response.api_token,
-          salePersonInfo: response.sale_person_info || null,
-          runningProject: response.running_project || null,
-          availableRacks: response.available_racks || [],
-          expiresAt: Date.now() + (24 * 60 * 60 * 1000) // 24 hours
-        };
+        // Save to localStorage (simple approach)
+        localStorage.setItem('auth_token', response.api_token);
+        localStorage.setItem('sale_person_info', JSON.stringify(response.sale_person_info || {}));
+        localStorage.setItem('running_project', JSON.stringify(response.running_project || {}));
+        localStorage.setItem('available_racks', JSON.stringify(response.available_racks || []));
 
-        // Save to offline storage
-        await offlineStorage.saveAuthData(authData);
+        // Ensure API client has the token (redundant but safe)
+        apiClient.setToken(response.api_token);
 
         set({
           isAuthenticated: true,
@@ -108,8 +139,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch (error) {
       console.error('Logout error:', error);
     } finally {
-      // Clear local state and storage regardless of API call result
-      await offlineStorage.clearAuthData();
+      // Clear localStorage
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('sale_person_info');
+      localStorage.removeItem('running_project');
+      localStorage.removeItem('available_racks');
       apiClient.clearToken();
       
       set({
@@ -164,27 +198,29 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ isLoading: true });
 
     try {
-      const authData = await offlineStorage.getAuthData();
-      
-      if (authData && authData.expiresAt > Date.now()) {
+      const authToken = localStorage.getItem('auth_token');
+      const salePersonInfo = localStorage.getItem('sale_person_info');
+      const runningProject = localStorage.getItem('running_project');
+      const availableRacks = localStorage.getItem('available_racks');
+
+      if (authToken) {
         // Set token in API client
-        apiClient.setToken(authData.apiToken);
+        apiClient.setToken(authToken);
 
         set({
           isAuthenticated: true,
           isLoading: false,
-          apiToken: authData.apiToken,
-          salePersonInfo: authData.salePersonInfo,
-          runningProject: authData.runningProject,
-          availableRacks: authData.availableRacks,
+          apiToken: authToken,
+          salePersonInfo: salePersonInfo ? JSON.parse(salePersonInfo) : null,
+          runningProject: runningProject ? JSON.parse(runningProject) : null,
+          availableRacks: availableRacks ? JSON.parse(availableRacks) : [],
           error: null
         });
 
         // Try to refresh token in background
         get().refreshToken().catch(console.error);
       } else {
-        // Auth data expired or doesn't exist
-        await offlineStorage.clearAuthData();
+        // No auth data found
         set({ isLoading: false });
       }
     } catch (error) {
