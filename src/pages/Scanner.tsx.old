@@ -2,19 +2,20 @@ import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Send, Package, CheckCircle, AlertCircle } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 
-// Theme utility to reduce repetitive ternary operations
-const theme = (isDark: boolean, darkClass: string, lightClass: string) =>
-  isDark ? darkClass : lightClass;
-
 export default function Scanner() {
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [scannedLots, setScannedLots] = useState<{[key: string]: number}>({});
   const [scanInput, setScanInput] = useState('');
-  const [lastScanned, setLastScanned] = useState<{lotId: string, time: number} | null>(null);
+  // Track last scanned lot and scan history for animation and display
+  const [lastScannedLot, setLastScannedLot] = useState<any>(null);
+  const [scanHistory, setScanHistory] = useState<any[]>([]);
+  const [showScanHistory, setShowScanHistory] = useState(false);
   const [isDesktop, setIsDesktop] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [error, setError] = useState('');
-
+  const [showErrorModal, setShowErrorModal] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [inputError, setInputError] = useState(false);
+  
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -317,8 +318,8 @@ export default function Scanner() {
                     />
                   </div>
                   
-                  {/* Last Scanned Lot and History */}
-                  {lastScannedLot && (
+                  {/* Last Scanned Lot - Mobile Only */}
+                  {!isDesktop && lastScannedLot && (
                     <div className={`p-3 rounded-lg border ${
                       isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'
                     }`}>
@@ -348,7 +349,7 @@ export default function Scanner() {
                         </div>
                       </div>
                       
-                      {/* Scan History */}
+                      {/* Scan History - Mobile */}
                       {showScanHistory && scanHistory.length > 0 && (
                         <div className={`mt-3 pt-3 border-t ${isDarkMode ? 'border-gray-600' : 'border-gray-200'}`}>
                           <p className={`text-xs font-medium mb-2 ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>
@@ -396,15 +397,53 @@ export default function Scanner() {
 
             {/* Right Panel - Lots List */}
             <div className="w-1/2 p-6">
-              <div className={`rounded-lg border h-full overflow-hidden ${
-                isDarkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
-              }`}>
-                <div className="p-4 border-b border-gray-200">
-                  <h3 className="font-semibold">Product Lots</h3>
-                  <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                    {Object.keys(scannedLots).length} of {selectedProduct.totalLots} lots scanned
-                  </p>
-                </div>
+              <div className="space-y-4">
+                {/* Scan History - Desktop */}
+                {isDesktop && scanHistory.length > 0 && (
+                  <div className={`rounded-lg shadow-sm p-4 transition-colors duration-300 ${
+                    isDarkMode ? 'bg-gray-800 border border-gray-600' : 'bg-white border border-gray-200'
+                  }`}>
+                    <h3 className={`font-semibold mb-3 ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>Recent Scans</h3>
+                    <div className="space-y-2">
+                      {scanHistory.slice(0, 5).map((scan, index) => (
+                        <div key={index} className={`flex justify-between items-center py-2 border-b last:border-0 ${
+                          isDarkMode ? 'border-gray-600' : 'border-gray-100'
+                        }`}>
+                          <span className={`font-mono font-medium ${isDarkMode ? 'text-gray-100' : 'text-gray-900'}`}>
+                            {scan.lotId}
+                          </span>
+                          <span className={`text-sm ${isDarkMode ? 'text-gray-300' : 'text-gray-500'}`}>
+                            {new Date(scan.timestamp).toLocaleTimeString()}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Ready to Scan Message - Desktop */}
+                {isDesktop && getTotalScanned() === 0 && (
+                  <div className={`border rounded-lg p-6 text-center transition-colors duration-300 ${
+                    isDarkMode ? 'bg-gray-700 border-gray-600' : 'bg-gray-50 border-gray-200'
+                  }`}>
+                    <Package className={`w-16 h-16 mx-auto mb-4 ${isDarkMode ? 'text-gray-400' : 'text-gray-400'}`} />
+                    <h3 className={`font-medium mb-3 text-lg ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Ready to Scan</h3>
+                    <p className={isDarkMode ? 'text-gray-300' : 'text-gray-600'}>
+                      Use the scanner input above to scan lot numbers.
+                    </p>
+                  </div>
+                )}
+                
+                {/* Lots List */}
+                <div className={`rounded-lg border h-full overflow-hidden ${
+                  isDarkMode ? 'border-gray-700 bg-gray-800' : 'border-gray-200 bg-white'
+                }`}>
+                  <div className="p-4 border-b border-gray-200">
+                    <h3 className="font-semibold">Product Lots</h3>
+                    <p className={`text-sm ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                      {Object.keys(scannedLots).length} of {selectedProduct.totalLots} lots scanned
+                    </p>
+                  </div>
                 <div className="overflow-y-auto h-full p-4 space-y-3">
                   {getSortedLots().map((lot: any) => (
                     <div
@@ -520,25 +559,58 @@ export default function Scanner() {
                       )}
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="font-mono text-sm font-medium">{lot.id}</p>
-                          <p className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
-                            Expires: {lot.expiry} • Theoretical: {lot.theoretical}
+                          <div className="flex items-center gap-2">
+                            {lot.status === 'scanned' ? (
+                              <CheckCircle className={`w-5 h-5 ${lot.showRecentAnimation ? 
+                                (isDarkMode ? 'text-green-400 animate-pulse' : 'text-green-600 animate-pulse') : 
+                                (isDarkMode ? 'text-emerald-400' : 'text-green-600')}`} />
+                            ) : (
+                              <div className={`w-5 h-5 border-2 rounded-full ${
+                                isDarkMode ? 'border-gray-400' : 'border-gray-300'
+                              }`}></div>
+                            )}
+                            <p className="font-mono text-lg font-bold">{lot.id}</p>
+                            {lot.showRecentAnimation && (
+                              <span className="text-xs bg-green-500 text-white px-2 py-0.5 rounded-full font-medium animate-bounce">
+                                ✓ SCANNED
+                              </span>
+                            )}
+                          </div>
+                          <p className={`text-xs ml-7 ${isDarkMode ? 'text-gray-400' : 'text-gray-600'}`}>
+                            Exp: {lot.expiry}
+                            {lot.showRecentAnimation && (
+                              <span className={`ml-2 font-medium ${isDarkMode ? 'text-green-300' : 'text-green-600'}`}>
+                                | {new Date(lastScannedLot.timestamp).toLocaleTimeString()}
+                              </span>
+                            )}
                           </p>
                         </div>
                         <div className="text-right">
-                          {lot.status === 'scanned' ? (
-                            <div className="flex items-center gap-1">
-                              <CheckCircle className={`w-4 h-4 text-green-600 ${lot.showRecentAnimation ? 'animate-pulse' : ''}`} />
-                              <span className={`text-sm font-medium text-green-600 ${lot.showRecentAnimation ? 'animate-pulse' : ''}`}>
-                                {lot.scannedCount}
-                              </span>
+                          <div className="text-2xl font-bold">
+                            <span className={
+                              lot.status === 'scanned' ? (
+                                lot.scannedCount === lot.theoretical ? (isDarkMode ? 'text-emerald-400' : 'text-green-600') : 
+                                lot.scannedCount > lot.theoretical ? (isDarkMode ? 'text-blue-400' : 'text-blue-600') : 
+                                (isDarkMode ? 'text-red-400' : 'text-red-600')
+                              ) : (isDarkMode ? 'text-gray-400' : 'text-gray-400')
+                            }>
+                              {lot.showRecentAnimation && lot.status === 'scanned' ? (
+                                <span className="animate-bounce">{lot.scannedCount}</span>
+                              ) : (
+                                lot.scannedCount || '0'
+                              )}
+                            </span>
+                            <span className={`text-lg ${isDarkMode ? 'text-gray-400' : 'text-gray-400'}`}> / {lot.theoretical}</span>
+                          </div>
+                          {lot.status === 'scanned' && lot.scannedCount !== lot.theoretical && (
+                            <div className={`text-sm font-bold ${lot.scannedCount > lot.theoretical ? 
+                              (isDarkMode ? 'text-blue-400' : 'text-blue-600') : 
+                              (isDarkMode ? 'text-red-400' : 'text-red-600')}`}>
+                              {lot.scannedCount > lot.theoretical ? '+' : ''}{lot.scannedCount - lot.theoretical}
                             </div>
-                          ) : (
-                            <div className={`text-xs px-2 py-1 rounded ${
-                              isDarkMode ? 'bg-gray-600 text-gray-300' : 'bg-gray-200 text-gray-600'
-                            }`}>
-                              Pending
-                            </div>
+                          )}
+                          {lot.status !== 'scanned' && (
+                            <div className={`text-xs ${isDarkMode ? 'text-gray-400' : 'text-gray-500'}`}>Not scanned</div>
                           )}
                         </div>
                       </div>

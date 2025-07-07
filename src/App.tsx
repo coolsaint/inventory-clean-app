@@ -1,16 +1,16 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import Dashboard from './pages/Dashboard';
-import Scanner from './pages/Scanner';
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import Login from './pages/Login';
+import Scanner from './pages/Scanner-simple';
 
 function App() {
   return (
     <Router>
-      <div className="App">
-        <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/scanner" element={<Scanner />} />
-        </Routes>
-      </div>
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/scanner" element={<Scanner />} />
+        <Route path="/" element={<Navigate to="/login" replace />} />
+      </Routes>
     </Router>
   );
 }
